@@ -143,7 +143,7 @@ public class SempClient {
 //		return this.putVpnObjectFullUrl(thisUrl, jsonBody);
 //
 
-		String encodedToQ = URLEncoder.encode(toQ, StandardCharsets.UTF_8);
+		String encodedToQ = encPathSeg(toQ);
 		String url = "/msgVpns/" + vpn + "/queues/" + encodedToQ + "/copyMsgFromQueue";
 		putVpnObject(url, map);
 	}
@@ -318,8 +318,7 @@ public class SempClient {
 
 	public String getObjectDetails(String vpn, String objectName, String identityColumn, String identityValue)
 			throws SempException {
-		String primaryKey = URLEncoder.encode(identityValue, StandardCharsets.UTF_8);
-
+		String primaryKey = encPathSeg(identityValue);
 		String resource = "monitor/msgVpns/" + vpn + "/" + objectName + "/" + primaryKey;
 		String responseText = "";
 		responseText = this.getSempV2(resource, ePaginationBehavior.eNone);
@@ -346,7 +345,7 @@ public class SempClient {
 	}
 
 	public String getQueueDetails(String vpn, String queueName) throws SempException {
-		String encodedQueueName = URLEncoder.encode(queueName, StandardCharsets.UTF_8);
+		String encodedQueueName = encPathSeg(queueName);
 		String resource = "config/msgVpns/{msgVpnName}/queues/{queueName}";
 		resource = resource.replace("{msgVpnName}", vpn);
 		resource = resource.replace("{queueName}", encodedQueueName);
@@ -563,7 +562,7 @@ public class SempClient {
 	}
 
 	public boolean getQueueBoolean(String vpn, String queueName, String field) throws SempException {
-		String encodedQueueName = URLEncoder.encode(queueName, StandardCharsets.UTF_8);
+		String encodedQueueName = encPathSeg(queueName);
 		String resource = "monitor/msgVpns/{msgVpnName}/queues/{queueName}";
 		resource = resource.replace("{msgVpnName}", vpn);
 		resource = resource.replace("{queueName}", encodedQueueName);
@@ -625,7 +624,7 @@ public class SempClient {
 	}	
 
 	public QueueInfo getQueueInfo(String msgVpnName, String queueName) throws SempException {
-		String encodedQueueName = URLEncoder.encode(queueName, StandardCharsets.UTF_8);
+		String encodedQueueName = encPathSeg(queueName);
 		String resource = "/msgVpns/" + msgVpnName + "/queues/" + encodedQueueName;
 		String result = getSempV2(resource, ePaginationBehavior.eNone);
 		
@@ -662,7 +661,6 @@ public class SempClient {
 		return rc;
 	}
 	public int getClientCount(String vpn) throws SempException {
-//		/curl -X GET -u mikeTest-admin:8p1sqblhq9feuj3n28mkbdtnn4  https://mr-connection-lt30wl00r51.messaging.solace.cloud:943/SEMP/v2/monitor/msgVpns/mikeTest/clients?select=clientId&count=1
 		String url = fullUrl.replace("config", "monitor");
 		url += "/msgVpns/{msgVpnName}/clients?select=clientId&count=1";
 		url = url.replace("{msgVpnName}", vpn);
@@ -696,6 +694,17 @@ public class SempClient {
 			fld.setAccessible(true);
 			int value = (int) container.getInt(fieldName);
 			fld.setInt(obj, value);
+		}
+	}
+
+	// Encodes a single URL path segment (not a full URL or query string).
+	private static String encPathSeg(String s) {
+		if (s.indexOf('%') >= 0) return s; // Expects raw, unencoded input else returns original string
+		try {
+			String encoded = URLEncoder.encode(s, StandardCharsets.UTF_8.name());
+			return encoded.replace("+", "%20");
+		} catch (java.io.UnsupportedEncodingException e) {
+			return s;
 		}
 	}
 }
