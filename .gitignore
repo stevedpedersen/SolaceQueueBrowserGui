@@ -14,3 +14,5 @@ SolaceQueueBrowserGui/logs/
 
 *.pdn
 requirements.txt
+
+SolaceQueueBrowserGui/config/sampleBrowserConfig.json

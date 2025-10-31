@@ -60,6 +60,9 @@ import com.solace.psg.queueBrowser.PaginatedCachingBrowser;
 import com.solace.psg.queueBrowser.gui.dragAndDrop.DroppableMessage;
 import com.solace.psg.queueBrowser.gui.dragAndDrop.IDragDropInstigator;
 import com.solace.psg.queueBrowser.gui.dragAndDrop.QueueMessageTransferInstigatorHandler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.solace.psg.util.CommandLog;
 import com.solacesystems.jcsmp.BytesXMLMessage;
 import com.solacesystems.jcsmp.Destination;
@@ -69,6 +72,7 @@ import com.solacesystems.jcsmp.SDTException;
 import com.solacesystems.jcsmp.SDTMap;
 
 public class BrowserDialog implements IDragDropInstigator {
+	private static final Logger logger = LoggerFactory.getLogger(BrowserDialog.class.getName());
 	private Broker broker;
 	private PaginatedCachingBrowser browser;
 	private String queue;
@@ -588,25 +592,30 @@ public class BrowserDialog implements IDragDropInstigator {
 	
 	private void moveOrCopy(boolean deleteFromSource) {
 		ArrayList<String> ids = getAllSelectedMessageIds();
+		
+		// Get target queue first for multi-message operations
+		QueueSelectorDialog dlg = new QueueSelectorDialog();
+		String selectedTargetQueue = dlg.selectQueues(parentFrame, otherQueues);
+		if (selectedTargetQueue == null || selectedTargetQueue.isEmpty()) {
+			return; // User cancelled
+		}
+		
 		if (ids.size() > 1) {
 			for (String id : ids) {
-				moveOrCopyMessage(id, deleteFromSource, false);
+				moveOrCopyMessage(id, selectedTargetQueue, deleteFromSource, false);
 			}
 			String action = "copied";
 			if (deleteFromSource == true) {
 				action = "moved";
 			}
-			String selectedTargetQueue = (String) comboBox.getSelectedItem();
 			setStatus(ids.size() + " messages were " + action+ " to " + selectedTargetQueue);
 		}
 		else {
 			String id = ids.get(0);
-			moveOrCopyMessage(id, deleteFromSource, true);
+			moveOrCopyMessage(id, selectedTargetQueue, deleteFromSource, true);
 		}
 	}
-	private void moveOrCopyMessage(String id, boolean deleteFromSource, boolean showStatus) {
-		String selectedTargetQueue = (String) comboBox.getSelectedItem();
-		
+	private void moveOrCopyMessage(String id, String selectedTargetQueue, boolean deleteFromSource, boolean showStatus) {
 		BytesXMLMessage msg = browser.get(id);
 		ReplicationGroupMessageId replicationId = msg.getReplicationGroupMessageId();
 		try {
@@ -1039,11 +1048,34 @@ public class BrowserDialog implements IDragDropInstigator {
 			semaphore.acquire();
 			browser.prefetchNextPage();
 		} catch (BrokerException | InterruptedException e) {
-			if (e.getMessage().contains("Browsing Not Supported on Partitioned Queue")) {
-				if (! cantBrowseWarningIssuedAlready) {
-					JOptionPane.showMessageDialog(this.dialog, "That queue is a partitioned queue. Browsing is not supported on Partitioned Queues");
+			String errorMsg = e.getMessage();
+			if (errorMsg != null && errorMsg.contains("Browsing Not Supported on Partitioned Queue")) {
+				if (! cantBrowseWarningIssuedAlready && dialog != null && dialog.isVisible()) {
+					SwingUtilities.invokeLater(() -> {
+						JOptionPane.showMessageDialog(dialog, "That queue is a partitioned queue. Browsing is not supported on Partitioned Queues");
+					});
 					cantBrowseWarningIssuedAlready = true;
 				}
+			} else {
+				String statusMsg;
+				if (errorMsg != null && errorMsg.contains("401") && errorMsg.contains("Unauthorized")) {
+					statusMsg = "Cannot browse: Authentication failed (401). Check messaging API credentials.";
+					logger.error("Messaging API authentication failed - 401 Unauthorized. Check messagingClientUsername and messagingPw in config.", e);
+				} else {
+					statusMsg = "Error fetching messages: " + (errorMsg != null ? errorMsg : e.getClass().getSimpleName());
+					logger.error("Failed to fetch messages", e);
+				}
+				// Show status in the dialog instead of blocking modal dialog
+				if (dialog != null && dialog.isVisible()) {
+					setStatus(statusMsg);
+				}
+			}
+			e.printStackTrace();
+		} catch (Exception e) {
+			String statusMsg = "Unexpected error fetching messages: " + e.getMessage();
+			logger.error("Unexpected error fetching messages", e);
+			if (dialog != null && dialog.isVisible()) {
+				setStatus(statusMsg);
 			}
 			e.printStackTrace();
 		} finally {
@@ -1132,7 +1164,14 @@ public class BrowserDialog implements IDragDropInstigator {
 	private Object[][] getMessages() throws BrokerException {
 		// Create an ArrayList of ArrayList<String> to store the data
 		ArrayList<ArrayList<String>> dynamicArray = new ArrayList<>();
-		ArrayList<BytesXMLMessage> thisPage = browser.getPage(nCurPage - 1); // its star6 counting at 0
+		ArrayList<BytesXMLMessage> thisPage = browser.getPage(nCurPage - 1); // page indexing starts at 0
+
+		logger.debug("Getting page {} for queue '{}', found {} messages in cache", nCurPage - 1, queue, thisPage.size());
+		
+		if (thisPage.isEmpty() && nCurPage == 1) {
+			logger.warn("No messages found in queue '{}' on first page. Queue may be empty or prefetch failed.", queue);
+			setStatus("No messages found in queue '" + queue + "'. Queue may be empty.");
+		}
 
 		for (BytesXMLMessage message : thisPage) {
 			ArrayList<String> row = new ArrayList<>();
